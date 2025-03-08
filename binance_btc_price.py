@@ -58,7 +58,15 @@ app.config['PROPAGATE_EXCEPTIONS'] = True  # 传播异常，便于调试
 # 共享数据存储
 shared_data = {
     'update_time': '',
-    'prices': []
+    'prices': [],
+    'last_full_update': 0  # 上次完整更新的时间戳
+}
+
+# 设置Binance API限制
+BINANCE_RATE_LIMIT = {
+    'max_requests_per_second': 10,  # Binance允许的每秒最大请求数
+    'max_requests_per_minute': 1200,  # Binance允许的每分钟最大请求数
+    'update_interval': 0.2  # 每200毫秒更新一次，即每秒5次
 }
 
 # HTML模板
@@ -271,6 +279,7 @@ HTML_TEMPLATE = """
     <script>
         let previousPrices = {};
         let lastUpdateTime = '';
+        let updateCount = 0;
         
         function updateData() {
             fetch('/api/prices')
@@ -278,51 +287,55 @@ HTML_TEMPLATE = """
                 .then(data => {
                     // 只有当更新时间变化时才更新数据，避免不必要的DOM操作
                     if (data.update_time !== lastUpdateTime) {
+                        updateCount++;
                         lastUpdateTime = data.update_time;
-                        document.querySelector('.update-time').textContent = '更新时间：' + data.update_time;
+                        document.querySelector('.update-time').textContent = '更新时间：' + data.update_time + ' (刷新次数: ' + updateCount + ')';
                         
-                        // 使用DocumentFragment提高性能
-                        const fragment = document.createDocumentFragment();
-                        
-                        data.prices.forEach(item => {
-                            const row = document.createElement('tr');
-                            const previousPrice = previousPrices[item.symbol];
+                        // 检查是否有价格数据更新
+                        if (data.prices && data.prices.length > 0) {
+                            // 使用DocumentFragment提高性能
+                            const fragment = document.createDocumentFragment();
                             
-                            // 币种名称
-                            const symbolCell = document.createElement('td');
-                            symbolCell.textContent = item.symbol;
-                            row.appendChild(symbolCell);
+                            data.prices.forEach(item => {
+                                const row = document.createElement('tr');
+                                const previousPrice = previousPrices[item.symbol];
+                                
+                                // 币种名称
+                                const symbolCell = document.createElement('td');
+                                symbolCell.textContent = item.symbol;
+                                row.appendChild(symbolCell);
+                                
+                                // 最新价格
+                                const priceCell = document.createElement('td');
+                                priceCell.className = 'price-cell';
+                                priceCell.textContent = item.price;
+                                if (previousPrice && previousPrice !== item.price) {
+                                    priceCell.classList.add(parseFloat(item.price) > parseFloat(previousPrice) ? 'flash-green' : 'flash-red');
+                                }
+                                row.appendChild(priceCell);
+                                
+                                // 24小时涨跌幅
+                                const percentageCell = document.createElement('td');
+                                percentageCell.innerHTML = item.percentage;
+                                row.appendChild(percentageCell);
+                                
+                                // 24H交易量
+                                const volumeCell = document.createElement('td');
+                                volumeCell.className = 'price-cell';
+                                volumeCell.textContent = item.volume;
+                                row.appendChild(volumeCell);
+                                
+                                fragment.appendChild(row);
+                                
+                                // 更新上一次价格
+                                previousPrices[item.symbol] = item.price;
+                            });
                             
-                            // 最新价格
-                            const priceCell = document.createElement('td');
-                            priceCell.className = 'price-cell';
-                            priceCell.textContent = item.price;
-                            if (previousPrice && previousPrice !== item.price) {
-                                priceCell.classList.add(parseFloat(item.price) > parseFloat(previousPrice) ? 'flash-green' : 'flash-red');
-                            }
-                            row.appendChild(priceCell);
-                            
-                            // 24小时涨跌幅
-                            const percentageCell = document.createElement('td');
-                            percentageCell.innerHTML = item.percentage;
-                            row.appendChild(percentageCell);
-                            
-                            // 24H交易量
-                            const volumeCell = document.createElement('td');
-                            volumeCell.className = 'price-cell';
-                            volumeCell.textContent = item.volume;
-                            row.appendChild(volumeCell);
-                            
-                            fragment.appendChild(row);
-                            
-                            // 更新上一次价格
-                            previousPrices[item.symbol] = item.price;
-                        });
-                        
-                        // 一次性更新DOM
-                        const tbody = document.querySelector('tbody');
-                        tbody.innerHTML = '';
-                        tbody.appendChild(fragment);
+                            // 一次性更新DOM
+                            const tbody = document.querySelector('tbody');
+                            tbody.innerHTML = '';
+                            tbody.appendChild(fragment);
+                        }
                     }
                 })
                 .catch(error => console.error('Error fetching data:', error));
@@ -331,8 +344,8 @@ HTML_TEMPLATE = """
         // 页面加载时立即更新一次
         document.addEventListener('DOMContentLoaded', updateData);
         
-        // 每500毫秒更新一次数据
-        setInterval(updateData, 500);
+        // 每200毫秒更新一次数据，与服务器更新频率匹配
+        setInterval(updateData, 200);
     </script>
 </head>
 <body>
@@ -386,7 +399,11 @@ def format_percentage(percentage: float) -> str:
 def get_price_data() -> List[Dict[str, Any]]:
     """获取价格数据"""
     try:
-        exchange = ccxt.binance()
+        exchange = ccxt.binance({
+            'enableRateLimit': True,  # 启用CCXT内置的速率限制
+            'rateLimit': 100  # 每个请求之间的最小延迟（毫秒）
+        })
+        
         symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'SOL/USDT',
                   'ADA/USDT', 'AVAX/USDT', 'DOGE/USDT', 'DOT/USDT', 'LINK/USDT']
         results = []
@@ -433,12 +450,24 @@ def update_prices():
     """更新价格数据的线程函数"""
     while True:
         try:
-            prices = get_price_data()
-            shared_data['prices'] = prices
-            shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            current_time = time.time()
+            
+            # 检查是否需要完整更新（每秒一次完整更新）
+            if current_time - shared_data['last_full_update'] >= 1.0:
+                # 完整更新所有数据
+                prices = get_price_data()
+                shared_data['prices'] = prices
+                shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                shared_data['last_full_update'] = current_time
+            else:
+                # 部分更新，只更新时间戳
+                shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
         except Exception as e:
             logger.error(f"Error updating prices: {str(e)}")
-        time.sleep(1)  # 每1秒更新一次，最大化刷新速度
+            
+        # 使用Binance API限制中设置的更新间隔
+        time.sleep(BINANCE_RATE_LIMIT['update_interval'])  # 每200毫秒更新一次，即每秒5次
 
 @app.route('/')
 def index():
