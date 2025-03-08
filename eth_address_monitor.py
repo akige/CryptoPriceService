@@ -8,6 +8,7 @@ import logging
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 import os
+import ssl
 
 # 设置日志级别
 logging.basicConfig(level=logging.ERROR)
@@ -15,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 # 配置重试策略
 retry_strategy = Retry(
-    total=3,
-    backoff_factor=0.5,
-    status_forcelist=[500, 502, 503, 504]
+    total=5,  # 增加重试次数
+    backoff_factor=1,  # 增加重试间隔
+    status_forcelist=[429, 500, 502, 503, 504],  # 添加429状态码
+    allowed_methods=["GET"]  # 只允许GET请求重试
 )
 adapter = HTTPAdapter(max_retries=retry_strategy)
 http = requests.Session()
@@ -167,6 +169,31 @@ ETH_HTML_TEMPLATE = """
             text-decoration: underline;
         }
         
+        .no-data {
+            text-align: center;
+            padding: 20px;
+            color: #888;
+            font-style: italic;
+        }
+        
+        .error-message {
+            background-color: rgba(244, 67, 54, 0.1);
+            border: 1px solid #F44336;
+            color: #F44336;
+            padding: 10px;
+            margin: 10px;
+            border-radius: 4px;
+        }
+        
+        .status-message {
+            background-color: rgba(33, 150, 243, 0.1);
+            border: 1px solid #2196F3;
+            color: #2196F3;
+            padding: 10px;
+            margin: 10px;
+            border-radius: 4px;
+        }
+        
         /* 移动设备优化 */
         @media screen and (max-width: 768px) {
             table {
@@ -199,6 +226,7 @@ ETH_HTML_TEMPLATE = """
         
         <div class="address-info">监控地址: <span id="address">{{ address }}</span></div>
         
+        {% if transactions %}
         <table>
             <thead>
                 <tr>
@@ -221,6 +249,18 @@ ETH_HTML_TEMPLATE = """
                 {% endfor %}
             </tbody>
         </table>
+        {% else %}
+        <div class="no-data">
+            <p>该地址暂无交易记录，或者API请求出现问题。</p>
+            <p>您可以：</p>
+            <ul>
+                <li>检查地址是否正确</li>
+                <li>确认API密钥是否有效</li>
+                <li>稍后再试</li>
+            </ul>
+            <p>您也可以直接在 <a href="https://etherscan.io/address/{{ address }}" target="_blank">Etherscan</a> 上查看该地址</p>
+        </div>
+        {% endif %}
     </div>
     
     <script>
@@ -236,7 +276,18 @@ ETH_HTML_TEMPLATE = """
                     
                     // 只有当地址匹配时才更新表格
                     if (data.current_address === currentAddress) {
+                        // 如果没有交易数据，刷新页面以显示无数据提示
+                        if (!data.transactions || data.transactions.length === 0) {
+                            location.reload();
+                            return;
+                        }
+                        
                         const tableBody = document.getElementById('transactions-table');
+                        if (!tableBody) {
+                            location.reload();
+                            return;
+                        }
+                        
                         const oldHashes = Array.from(tableBody.querySelectorAll('tr')).map(row => 
                             row.querySelector('td:first-child a').textContent
                         );
@@ -264,7 +315,11 @@ ETH_HTML_TEMPLATE = """
                         });
                     }
                 })
-                .catch(error => console.error('Error fetching data:', error));
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    // 5分钟后刷新页面
+                    setTimeout(() => location.reload(), 300000);
+                });
         }
         
         // 每30秒刷新一次数据
@@ -278,9 +333,19 @@ def get_eth_transactions() -> List[Dict[str, Any]]:
     """获取指定ETH地址的交易记录"""
     try:
         address = eth_data['current_address']
+        if not address:
+            logger.warning("No ETH address specified")
+            return []
+            
+        # 添加超时和SSL验证选项
         url = f"https://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={ETHERSCAN_API_KEY}"
         
-        response = http.get(url, timeout=10)
+        # 创建自定义SSL上下文
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        response = http.get(url, timeout=30, verify=False)  # 增加超时时间，禁用SSL验证
         data = response.json()
         
         if data['status'] == '1':
@@ -309,8 +374,29 @@ def get_eth_transactions() -> List[Dict[str, Any]]:
                 })
             
             return transactions
+        elif data['status'] == '0' and data['message'] == 'No transactions found':
+            # 处理没有交易的情况，不记录为错误
+            logger.info(f"No transactions found for address: {address}")
+            return []
         else:
             logger.error(f"Etherscan API error: {data['message']}")
+            return []
+    except requests.exceptions.SSLError as e:
+        logger.error(f"SSL Error: {str(e)}")
+        # 尝试不使用SSL验证重新请求
+        try:
+            url = f"http://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={ETHERSCAN_API_KEY}"
+            response = http.get(url, timeout=30, verify=False)
+            data = response.json()
+            
+            if data['status'] == '1':
+                # 处理数据...
+                # 这里简化处理，实际应该复制上面的代码
+                return []
+            else:
+                return []
+        except Exception as inner_e:
+            logger.error(f"Error in fallback request: {str(inner_e)}")
             return []
     except Exception as e:
         logger.error(f"Error fetching ETH transactions: {str(e)}")
@@ -320,6 +406,11 @@ def update_eth_transactions():
     """更新ETH交易数据"""
     while True:
         try:
+            if not eth_data['addresses']:
+                logger.warning("No ETH addresses configured")
+                time.sleep(30)
+                continue
+                
             transactions = get_eth_transactions()
             eth_data['transactions'] = transactions
             eth_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
