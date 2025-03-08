@@ -15,6 +15,7 @@ from requests.packages.urllib3.util.retry import Retry
 import os
 import asyncio
 import concurrent.futures
+import queue
 # 导入ETH地址监控模块
 from eth_address_monitor import eth_bp, start_eth_monitor
 
@@ -59,14 +60,16 @@ app.config['PROPAGATE_EXCEPTIONS'] = True  # 传播异常，便于调试
 shared_data = {
     'update_time': '',
     'prices': [],
-    'last_full_update': 0  # 上次完整更新的时间戳
+    'last_full_update': 0,  # 上次完整更新的时间戳
+    'price_queue': queue.Queue(),  # 价格更新队列
+    'update_count': 0  # 更新计数器
 }
 
 # 设置Binance API限制
 BINANCE_RATE_LIMIT = {
-    'max_requests_per_second': 10,  # Binance允许的每秒最大请求数
+    'max_requests_per_second': 20,  # Binance允许的每秒最大请求数
     'max_requests_per_minute': 1200,  # Binance允许的每分钟最大请求数
-    'update_interval': 0.2  # 每200毫秒更新一次，即每秒5次
+    'update_interval': 0.05  # 每50毫秒更新一次，即每秒20次
 }
 
 # HTML模板
@@ -99,11 +102,22 @@ HTML_TEMPLATE = """
             box-sizing: border-box;
             overflow-x: hidden;
         }
-        .update-time {
+        .update-info {
             margin-bottom: 10px;
             font-size: 16px;
             color: #888;
             padding: 0 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .update-time {
+            color: #64B5F6;
+        }
+        .update-count {
+            color: #4CAF50;
+        }
+        .refresh-rate {
+            color: #FF9800;
         }
         table {
             width: 1000px;
@@ -161,11 +175,11 @@ HTML_TEMPLATE = """
         }
         
         .flash-green {
-            animation: flash-green 1s ease-out;
+            animation: flash-green 0.5s ease-out;
         }
         
         .flash-red {
-            animation: flash-red 1s ease-out;
+            animation: flash-red 0.5s ease-out;
         }
         
         /* 调整列宽比例 */
@@ -280,16 +294,46 @@ HTML_TEMPLATE = """
         let previousPrices = {};
         let lastUpdateTime = '';
         let updateCount = 0;
+        let lastUpdateTimestamp = Date.now();
+        let refreshRates = [];
         
         function updateData() {
+            const fetchStart = Date.now();
+            
             fetch('/api/prices')
                 .then(response => response.json())
                 .then(data => {
+                    const fetchEnd = Date.now();
+                    const fetchTime = fetchEnd - fetchStart;
+                    
                     // 只有当更新时间变化时才更新数据，避免不必要的DOM操作
                     if (data.update_time !== lastUpdateTime) {
+                        // 计算刷新率
+                        const now = Date.now();
+                        const timeSinceLastUpdate = now - lastUpdateTimestamp;
+                        lastUpdateTimestamp = now;
+                        
+                        if (timeSinceLastUpdate > 0) {
+                            // 保存最近10次的刷新率
+                            refreshRates.push(timeSinceLastUpdate);
+                            if (refreshRates.length > 10) {
+                                refreshRates.shift();
+                            }
+                            
+                            // 计算平均刷新率
+                            const avgRefreshRate = refreshRates.reduce((a, b) => a + b, 0) / refreshRates.length;
+                            const refreshPerSecond = Math.round((1000 / avgRefreshRate) * 10) / 10;
+                            
+                            // 更新刷新率显示
+                            document.getElementById('refresh-rate').textContent = `${refreshPerSecond}/秒`;
+                        }
+                        
                         updateCount++;
                         lastUpdateTime = data.update_time;
-                        document.querySelector('.update-time').textContent = '更新时间：' + data.update_time + ' (刷新次数: ' + updateCount + ')';
+                        
+                        // 更新时间和计数器
+                        document.getElementById('update-time').textContent = data.update_time;
+                        document.getElementById('update-count').textContent = data.update_count;
                         
                         // 检查是否有价格数据更新
                         if (data.prices && data.prices.length > 0) {
@@ -311,6 +355,11 @@ HTML_TEMPLATE = """
                                 priceCell.textContent = item.price;
                                 if (previousPrice && previousPrice !== item.price) {
                                     priceCell.classList.add(parseFloat(item.price) > parseFloat(previousPrice) ? 'flash-green' : 'flash-red');
+                                    
+                                    // 300毫秒后移除闪烁效果，以便下次更新可以再次闪烁
+                                    setTimeout(() => {
+                                        priceCell.classList.remove('flash-green', 'flash-red');
+                                    }, 300);
                                 }
                                 row.appendChild(priceCell);
                                 
@@ -337,20 +386,29 @@ HTML_TEMPLATE = """
                             tbody.appendChild(fragment);
                         }
                     }
+                    
+                    // 根据网络延迟动态调整下一次请求的时间
+                    const nextUpdateDelay = Math.max(10, 50 - fetchTime);
+                    setTimeout(updateData, nextUpdateDelay);
                 })
-                .catch(error => console.error('Error fetching data:', error));
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    // 出错后延迟1秒再重试
+                    setTimeout(updateData, 1000);
+                });
         }
         
         // 页面加载时立即更新一次
         document.addEventListener('DOMContentLoaded', updateData);
-        
-        // 每200毫秒更新一次数据，与服务器更新频率匹配
-        setInterval(updateData, 200);
     </script>
 </head>
 <body>
     <div class="container">
-        <div class="update-time">更新时间：{{ update_time }}</div>
+        <div class="update-info">
+            <div>更新时间: <span id="update-time" class="update-time">{{ update_time }}</span></div>
+            <div>更新计数: <span id="update-count" class="update-count">{{ update_count }}</span></div>
+            <div>刷新率: <span id="refresh-rate" class="refresh-rate">0/秒</span></div>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -401,7 +459,7 @@ def get_price_data() -> List[Dict[str, Any]]:
     try:
         exchange = ccxt.binance({
             'enableRateLimit': True,  # 启用CCXT内置的速率限制
-            'rateLimit': 100  # 每个请求之间的最小延迟（毫秒）
+            'rateLimit': 50  # 每个请求之间的最小延迟（毫秒）
         })
         
         symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'SOL/USDT',
@@ -424,8 +482,10 @@ def get_price_data() -> List[Dict[str, Any]]:
                     return {
                         'symbol': symbol.replace('/USDT', ''),
                         'price': f"{ticker['last']:.2f}",
+                        'raw_price': ticker['last'],  # 保存原始价格用于比较
                         'percentage': format_percentage(percentage),
-                        'volume': format_volume(volume)
+                        'volume': format_volume(volume),
+                        'timestamp': time.time()  # 添加时间戳
                     }
                 except Exception as e:
                     logger.error(f"Error processing {symbol}: {str(e)}")
@@ -446,37 +506,104 @@ def get_price_data() -> List[Dict[str, Any]]:
         logger.error(f"Error in get_price_data: {str(e)}")
         return []
 
+# 单独获取单个币种的价格
+def get_single_price(symbol):
+    try:
+        exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'rateLimit': 50
+        })
+        
+        ticker = exchange.fetch_ticker(symbol)
+        
+        return {
+            'symbol': symbol.replace('/USDT', ''),
+            'price': f"{ticker['last']:.2f}",
+            'raw_price': ticker['last'],
+            'timestamp': time.time()
+        }
+    except Exception as e:
+        logger.error(f"Error getting single price for {symbol}: {str(e)}")
+        return None
+
+# 价格更新线程函数
+def price_updater(symbol):
+    """单独更新一个币种的价格"""
+    while True:
+        try:
+            price_data = get_single_price(symbol)
+            if price_data:
+                shared_data['price_queue'].put(price_data)
+        except Exception as e:
+            logger.error(f"Error in price updater for {symbol}: {str(e)}")
+        
+        # 随机延迟50-150毫秒，避免所有请求同时发送
+        time.sleep(0.05 + (hash(symbol) % 10) * 0.01)
+
 def update_prices():
     """更新价格数据的线程函数"""
+    # 启动单独的价格更新线程
+    symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'SOL/USDT',
+              'ADA/USDT', 'AVAX/USDT', 'DOGE/USDT', 'DOT/USDT', 'LINK/USDT']
+    
+    # 为每个币种启动单独的更新线程
+    for symbol in symbols:
+        thread = threading.Thread(target=price_updater, args=(symbol,), daemon=True)
+        thread.start()
+    
+    # 主更新循环
     while True:
         try:
             current_time = time.time()
             
-            # 检查是否需要完整更新（每秒一次完整更新）
-            if current_time - shared_data['last_full_update'] >= 1.0:
+            # 检查是否需要完整更新（每2秒一次完整更新）
+            if current_time - shared_data['last_full_update'] >= 2.0:
                 # 完整更新所有数据
                 prices = get_price_data()
                 shared_data['prices'] = prices
-                shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
                 shared_data['last_full_update'] = current_time
+                shared_data['update_count'] += 1
             else:
-                # 部分更新，只更新时间戳
-                shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                # 处理队列中的价格更新
+                try:
+                    # 非阻塞方式获取队列数据
+                    while not shared_data['price_queue'].empty():
+                        price_data = shared_data['price_queue'].get(block=False)
+                        
+                        # 更新对应币种的价格
+                        for i, item in enumerate(shared_data['prices']):
+                            if item['symbol'] == price_data['symbol']:
+                                # 只更新价格和时间戳
+                                shared_data['prices'][i]['price'] = price_data['price']
+                                shared_data['prices'][i]['raw_price'] = price_data['raw_price']
+                                shared_data['prices'][i]['timestamp'] = price_data['timestamp']
+                                break
+                        
+                        shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        shared_data['update_count'] += 1
+                except queue.Empty:
+                    pass
                 
         except Exception as e:
             logger.error(f"Error updating prices: {str(e)}")
             
         # 使用Binance API限制中设置的更新间隔
-        time.sleep(BINANCE_RATE_LIMIT['update_interval'])  # 每200毫秒更新一次，即每秒5次
+        time.sleep(BINANCE_RATE_LIMIT['update_interval'])  # 每50毫秒更新一次，即每秒20次
 
 @app.route('/')
 def index():
     """主页"""
-    return render_template_string(HTML_TEMPLATE, update_time=shared_data['update_time'], prices=shared_data['prices'])
+    return render_template_string(HTML_TEMPLATE, update_time=shared_data['update_time'], prices=shared_data['prices'], update_count=shared_data['update_count'])
 
 @app.route('/api/prices')
 def get_prices():
-    return jsonify(shared_data)
+    """API端点，返回价格数据"""
+    return jsonify({
+        'update_time': shared_data['update_time'],
+        'prices': shared_data['prices'],
+        'update_count': shared_data['update_count']
+    })
 
 if __name__ == "__main__":
     # 启动价格更新线程
