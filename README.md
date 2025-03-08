@@ -1,7 +1,7 @@
 # CryptoPriceService
 
 一个基于Python的加密货币价格监控Windows服务。
-实时显示比特币等加密货币的价格、涨跌幅和交易量，支持系统启动自动运行。
+实时显示比特币等加密货币的价格、涨跌幅和交易量，支持系统启动自动运行。同时提供以太坊地址交易监控功能。
 
 ## 功能特点
 
@@ -13,6 +13,7 @@
 - 优化的 iPad mini 7 显示支持
 - 自动数据刷新(涨跌闪烁效果)
 - 日志记录功能
+- **新功能：实时监控指定ETH地址的链上交易**
 
 ## 系统要求
 
@@ -35,10 +36,13 @@ pip install pywin32 flask ccxt flask-cors requests
 2. 将以下文件放在同一目录下：
 - binance_btc_price.py（主程序）
 - crypto_price_service.py（服务程序）
+- eth_address_monitor.py（ETH地址监控程序）
 - install_service.bat（安装脚本）
 - uninstall_service.bat（卸载脚本）
 
-3. 以管理员权限运行 install_service.bat 安装服务
+3. **重要：** 在 eth_address_monitor.py 文件中，将 ETHERSCAN_API_KEY 替换为您自己的 Etherscan API 密钥（可以在 https://etherscan.io/myapikey 免费注册获取）
+
+4. 以管理员权限运行 install_service.bat 安装服务
 
 ## 服务管理
 
@@ -61,6 +65,7 @@ pip install pywin32 flask ccxt flask-cors requests
 1. 服务启动后，打开浏览器访问：http://localhost:5000
 2. 页面会自动显示并更新加密货币的价格信息
 3. 服务日志位于：C:\crypto_price_service.log
+4. **ETH地址监控：** 访问 http://localhost:5000/eth 查看指定ETH地址的最近5条交易
 
 ## 卸载说明
 
@@ -78,6 +83,11 @@ pip install pywin32 flask ccxt flask-cors requests
    - 确认服务是否正在运行
    - 检查端口 5000 是否被其他程序占用
    - 检查防火墙设置
+
+3. ETH交易监控不显示数据
+   - 确认您已经设置了有效的 Etherscan API 密钥
+   - 检查监控的地址是否有交易记录
+   - 查看日志文件了解详细错误信息
 
 ## 贡献
 

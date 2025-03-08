@@ -13,6 +13,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 import os
+# 导入ETH地址监控模块
+from eth_address_monitor import eth_bp, start_eth_monitor
 
 # ANSI颜色代码
 GREEN = '\033[32m'
@@ -43,6 +45,8 @@ http.mount("https://", adapter)
 app = Flask(__name__)
 app.logger.setLevel(logging.ERROR)  # 设置Flask日志级别
 CORS(app)  # 启用CORS支持
+# 注册ETH地址监控蓝图
+app.register_blueprint(eth_bp)
 
 # 共享数据存储
 shared_data = {
@@ -408,29 +412,32 @@ def get_price_data() -> List[Dict[str, Any]]:
         return []
 
 def update_prices():
-    """更新价格数据的后台任务"""
+    """更新价格数据的线程函数"""
     while True:
         try:
             prices = get_price_data()
-            if prices:
-                shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                shared_data['prices'] = prices
+            shared_data['prices'] = prices
+            shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         except Exception as e:
-            logger.error(f"Error in update_prices: {str(e)}")
-        time.sleep(1)
+            logger.error(f"Error updating prices: {str(e)}")
+        time.sleep(5)  # 每5秒更新一次
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    """主页"""
+    return render_template_string(HTML_TEMPLATE, update_time=shared_data['update_time'], prices=shared_data['prices'])
 
 @app.route('/api/prices')
 def get_prices():
     return jsonify(shared_data)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # 启动价格更新线程
     price_thread = threading.Thread(target=update_prices, daemon=True)
     price_thread.start()
     
-    # 启动Flask应用
+    # 启动ETH地址监控线程
+    start_eth_monitor()
+    
+    # 启动Flask服务器
     app.run(host='0.0.0.0', port=5000, debug=False)

@@ -6,6 +6,7 @@ import socket
 import sys
 import os
 from binance_btc_price import app, update_prices
+from eth_address_monitor import update_eth_transactions
 import threading
 import logging
 
@@ -49,6 +50,13 @@ class CryptoPriceService(win32serviceutil.ServiceFramework):
                 daemon=True
             )
             price_thread.start()
+            
+            # 启动ETH地址监控线程
+            eth_thread = threading.Thread(
+                target=update_eth_transactions,
+                daemon=True
+            )
+            eth_thread.start()
 
             # 保持服务运行
             while self.running:
