@@ -166,22 +166,22 @@ HTML_TEMPLATE = """
         
         @keyframes flash-green {
             0% { background-color: transparent; }
-            50% { background-color: rgba(76, 175, 80, 0.3); }
+            50% { background-color: rgba(76, 175, 80, 0.5); }
             100% { background-color: transparent; }
         }
         
         @keyframes flash-red {
             0% { background-color: transparent; }
-            50% { background-color: rgba(244, 67, 54, 0.3); }
+            50% { background-color: rgba(244, 67, 54, 0.5); }
             100% { background-color: transparent; }
         }
         
         .flash-green {
-            animation: flash-green 1s ease-out;
+            animation: flash-green 0.5s ease-out;
         }
         
         .flash-red {
-            animation: flash-red 1s ease-out;
+            animation: flash-red 0.5s ease-out;
         }
         
         /* 调整列宽比例 */
@@ -374,7 +374,7 @@ HTML_TEMPLATE = """
             flashTimeouts[symbol] = setTimeout(() => {
                 tr.classList.remove(flashClass);
                 delete flashTimeouts[symbol];
-            }, 1000);
+            }, 500);
         }
         
         function updateData() {
@@ -382,6 +382,9 @@ HTML_TEMPLATE = """
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('update-time').textContent = data.update_time;
+                    document.getElementById('update-count').textContent = data.update_count;
+                    document.getElementById('refresh-rate').textContent = data.updates_per_second + "/秒";
+                    
                     const tbody = document.getElementById('price-tbody');
                     
                     data.prices.forEach(row => {
@@ -420,8 +423,8 @@ HTML_TEMPLATE = """
                 });
         }
 
-        // 每500毫秒更新一次数据
-        setInterval(updateData, 500);
+        // 每200毫秒更新一次数据，提高刷新频率
+        setInterval(updateData, 200);
         
         // 立即执行一次更新
         updateData();
@@ -607,8 +610,8 @@ def update_prices():
         except Exception as e:
             logger.error(f"Error updating prices: {str(e)}")
         
-        # 添加小延迟以避免过度请求
-        time.sleep(0.1)  # 100毫秒延迟，每秒最多10次更新
+        # 减少延迟以提高刷新速度
+        time.sleep(0.05)  # 50毫秒延迟，每秒最多20次更新
 
 @app.route('/')
 def index():
