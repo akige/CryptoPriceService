@@ -122,8 +122,8 @@ HTML_TEMPLATE = """
             color: #FF9800;
         }
         table {
-            width: 1000px;
-            min-width: 1000px;
+            width: 1440px;
+            min-width: 1440px;
             table-layout: fixed;
             border-collapse: collapse;
             white-space: nowrap;
@@ -177,16 +177,16 @@ HTML_TEMPLATE = """
         }
         
         .flash-green {
-            animation: flash-green 0.3s ease-out;
+            animation: flash-green 1s ease-out;
         }
         
         .flash-red {
-            animation: flash-red 0.3s ease-out;
+            animation: flash-red 1s ease-out;
         }
         
         /* 调整列宽比例 */
         th:nth-child(1), td:nth-child(1) { width: 100px; min-width: 100px; max-width: 100px; text-align: center; font-weight: bold; padding: 8px 0; }
-        th:nth-child(2), td:nth-child(2) { width: 200px; min-width: 200px; max-width: 200px; text-align: center; font-weight: bold; padding: 8px 0; }
+        th:nth-child(2), td:nth-child(2) { width: 260px; min-width: 260px; max-width: 260px; text-align: center; font-weight: bold; padding: 8px 0; }
         th:nth-child(3), td:nth-child(3) { width: 200px; min-width: 200px; max-width: 200px; text-align: center; padding: 8px 0; }
         th:nth-child(4), td:nth-child(4) { width: 280px; min-width: 280px; max-width: 280px; text-align: center; padding: 8px 0; }
         
@@ -237,9 +237,9 @@ HTML_TEMPLATE = """
                 padding: 6px 0;
             }
             th:nth-child(2), td:nth-child(2) { 
-                width: 200px; 
-                min-width: 200px;
-                max-width: 200px;
+                width: 260px; 
+                min-width: 260px;
+                max-width: 260px;
                 padding: 6px 0;
             }
             th:nth-child(3), td:nth-child(3) { 
@@ -291,73 +291,140 @@ HTML_TEMPLATE = """
                 height: 35px;
             }
         }
+        
+        @supports (-webkit-overflow-scrolling: touch) {
+            .container {
+                -webkit-overflow-scrolling: touch;
+                overflow-x: hidden;
+                -webkit-overflow-style: -apple-system;
+                width: 100%;
+                max-width: 100vw;
+                margin: 0;
+                padding: 5px;
+                -webkit-transform: translateZ(0);
+            }
+            
+            table {
+                transform: translateZ(0);
+                backface-visibility: hidden;
+            }
+            
+            .flash-green, .flash-red {
+                -webkit-animation-duration: 1s;
+                -webkit-animation-timing-function: ease-out;
+                -webkit-animation-fill-mode: both;
+            }
+            
+            /* iOS设备特定的滚动优化 */
+            ::-webkit-scrollbar {
+                -webkit-appearance: none;
+                width: 3px;
+                height: 3px;
+            }
+            
+            ::-webkit-scrollbar-thumb {
+                border-radius: 2px;
+                background-color: rgba(255, 255, 255, .2);
+            }
+            
+            /* iOS设备文字优化 */
+            .price-cell {
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+            
+            /* 优化iOS设备上的性能 */
+            * {
+                -webkit-backface-visibility: hidden;
+                -webkit-transform: translateZ(0);
+            }
+            
+            body {
+                overflow-x: hidden;
+            }
+        }
     </style>
     <script>
-        let previousPrices = {};
-        let lastUpdateTime = '';
-        let updateCount = 0;
-        let lastUpdateTimestamp = Date.now();
-        let refreshRates = [];
+        let lastPrices = {};
+        let flashTimeouts = {};
+        
+        function extractPrice(html) {
+            const text = html.replace(/<[^>]*>/g, '').trim();
+            const number = text.match(/[\d.]+/);
+            return number ? parseFloat(number[0]) : null;
+        }
+        
+        function flashRow(tr, isUp) {
+            const symbol = tr.getAttribute('data-symbol');
+            
+            // 清除之前的超时
+            if (flashTimeouts[symbol]) {
+                clearTimeout(flashTimeouts[symbol]);
+                tr.classList.remove('flash-green', 'flash-red');
+            }
+            
+            // 强制重绘
+            void tr.offsetWidth;
+            
+            // 添加新的闪烁类
+            const flashClass = isUp ? 'flash-green' : 'flash-red';
+            tr.classList.add(flashClass);
+            
+            // 设置新的超时
+            flashTimeouts[symbol] = setTimeout(() => {
+                tr.classList.remove(flashClass);
+                delete flashTimeouts[symbol];
+            }, 1000);
+        }
         
         function updateData() {
             fetch('/api/prices')
                 .then(response => response.json())
                 .then(data => {
-                    // 计算刷新率
-                    const now = Date.now();
-                    const timeSinceLastUpdate = now - lastUpdateTimestamp;
-                    lastUpdateTimestamp = now;
-                    
-                    if (timeSinceLastUpdate > 0) {
-                        // 保存最近10次的刷新率
-                        refreshRates.push(timeSinceLastUpdate);
-                        if (refreshRates.length > 10) {
-                            refreshRates.shift();
-                        }
-                        
-                        // 计算平均刷新率
-                        const avgRefreshRate = refreshRates.reduce((a, b) => a + b, 0) / refreshRates.length;
-                        const refreshPerSecond = Math.round((1000 / avgRefreshRate) * 10) / 10;
-                        
-                        // 更新刷新率显示
-                        document.getElementById('refresh-rate').textContent = `${refreshPerSecond}/秒`;
-                    }
-                    
-                    // 更新时间和计数器
                     document.getElementById('update-time').textContent = data.update_time;
-                    document.getElementById('update-count').textContent = data.update_count;
+                    const tbody = document.getElementById('price-tbody');
                     
-                    // 更新价格表格
-                    const tbody = document.getElementById('price-table-body');
-                    
-                    data.prices.forEach((item, index) => {
-                        const row = tbody.children[index];
-                        const priceCell = row.children[1];
-                        const previousPrice = previousPrices[item.symbol];
-                        
-                        // 更新价格
-                        priceCell.textContent = item.price;
-                        
-                        // 添加闪烁效果
-                        if (previousPrice && previousPrice !== item.price) {
-                            priceCell.classList.remove('flash-green', 'flash-red');
-                            void priceCell.offsetWidth; // 触发重绘
-                            priceCell.classList.add(parseFloat(item.price) > parseFloat(previousPrice) ? 'flash-green' : 'flash-red');
+                    data.prices.forEach(row => {
+                        let tr = tbody.querySelector(`tr[data-symbol="${row.symbol}"]`);
+                        if (!tr) {
+                            tr = document.createElement('tr');
+                            tr.setAttribute('data-symbol', row.symbol);
+                            tbody.appendChild(tr);
                         }
                         
-                        // 更新上一次价格
-                        previousPrices[item.symbol] = item.price;
+                        // 获取当前价格
+                        const currentPrice = extractPrice(row.price_html);
+                        const lastPrice = lastPrices[row.symbol];
+                        
+                        // 如果价格发生变化，添加闪烁效果
+                        if (lastPrice !== undefined && currentPrice !== null && currentPrice !== lastPrice) {
+                            flashRow(tr, currentPrice > lastPrice);
+                        }
+                        
+                        // 更新行内容
+                        tr.innerHTML = `
+                            <td>${row.symbol}</td>
+                            <td class="price-cell">${row.price_html}</td>
+                            <td class="price-cell">${row.percentage_changes}</td>
+                            <td class="price-cell">${row.volume}</td>
+                        `;
+                        
+                        // 保存当前价格用于下次比较
+                        if (currentPrice !== null) {
+                            lastPrices[row.symbol] = currentPrice;
+                        }
                     });
                 })
-                .catch(error => console.error('Error fetching data:', error))
-                .finally(() => {
-                    // 无论成功还是失败，立即请求下一次更新
-                    requestAnimationFrame(updateData);
+                .catch(error => {
+                    console.error('Error fetching data:', error);
                 });
         }
+
+        // 每500毫秒更新一次数据
+        setInterval(updateData, 500);
         
-        // 页面加载时立即更新一次
-        document.addEventListener('DOMContentLoaded', updateData);
+        // 立即执行一次更新
+        updateData();
     </script>
 </head>
 <body>
@@ -370,21 +437,21 @@ HTML_TEMPLATE = """
         <table>
             <thead>
                 <tr>
-                    <th>币种</th>
+                    <th>币种名称</th>
                     <th>最新价格</th>
-                    <th>24小时涨跌幅</th>
-                    <th>24小时交易量</th>
+                    <th>24H涨跌%</th>
+                    <th>24H交易量</th>
                 </tr>
             </thead>
-            <tbody id="price-table-body">
-                {% for item in prices %}
-                <tr>
-                    <td>{{ item.symbol }}</td>
-                    <td class="price-cell">{{ item.price }}</td>
-                    <td>{{ item.percentage|safe }}</td>
-                    <td class="price-cell">{{ item.volume }}</td>
+            <tbody id="price-tbody">
+            {% for row in prices %}
+                <tr data-symbol="{{ row.symbol }}">
+                    <td>{{ row.symbol }}</td>
+                    <td class="price-cell">{{ row.price_html | safe }}</td>
+                    <td class="price-cell">{{ row.percentage_changes | safe }}</td>
+                    <td class="price-cell">{{ row.volume | safe }}</td>
                 </tr>
-                {% endfor %}
+            {% endfor %}
             </tbody>
         </table>
     </div>
