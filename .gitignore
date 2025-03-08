@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 日志文件
+*.log
+
+# 本地配置文件
+config.local.py
+*.local.py
+secrets.py
+
+# 环境变量文件
+.env
+
+# 个人API密钥文件 - 可以创建一个单独的文件存储API密钥
+api_keys.py
+credentials.py
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo 

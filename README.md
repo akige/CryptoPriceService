@@ -40,7 +40,14 @@ pip install pywin32 flask ccxt flask-cors requests
 - install_service.bat（安装脚本）
 - uninstall_service.bat（卸载脚本）
 
-3. **重要：** 在 eth_address_monitor.py 文件中，将 ETHERSCAN_API_KEY 替换为您自己的 Etherscan API 密钥（可以在 https://etherscan.io/myapikey 免费注册获取）
+3. **配置API密钥：** 有两种方式设置Etherscan API密钥：
+   - 方式一：直接在 eth_address_monitor.py 文件中修改 ETHERSCAN_API_KEY 变量
+   - 方式二（推荐）：创建 api_keys.py 文件，内容如下：
+     ```python
+     # Etherscan API密钥
+     ETHERSCAN_API_KEY = "您的API密钥"
+     ```
+   - 您可以在 https://etherscan.io/myapikey 免费注册获取API密钥
 
 4. 以管理员权限运行 install_service.bat 安装服务
 

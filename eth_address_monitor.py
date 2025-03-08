@@ -7,6 +7,7 @@ from flask import Flask, render_template_string, jsonify, Blueprint
 import logging
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+import os
 
 # 设置日志级别
 logging.basicConfig(level=logging.ERROR)
@@ -33,9 +34,13 @@ eth_data = {
     'address': '0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6'
 }
 
-# 获取Etherscan API密钥 - 您需要在Etherscan注册获取免费API密钥
-# 请替换为您自己的API密钥
-ETHERSCAN_API_KEY = "YourEtherscanApiKey"  # 替换为您的API密钥
+# 获取Etherscan API密钥
+# 尝试从api_keys.py加载API密钥，如果不存在则使用默认值
+try:
+    from api_keys import ETHERSCAN_API_KEY
+except ImportError:
+    # 默认占位符，上传到GitHub时使用
+    ETHERSCAN_API_KEY = "YourEtherscanApiKey"  # 替换为您的API密钥
 
 # HTML模板
 ETH_HTML_TEMPLATE = """
