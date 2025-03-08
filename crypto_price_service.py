@@ -39,7 +39,7 @@ class CryptoPriceService(win32serviceutil.ServiceFramework):
 
             # 启动Flask服务器
             flask_thread = threading.Thread(
-                target=lambda: app.run(host='0.0.0.0', port=8080, debug=False),
+                target=lambda: app.run(host='0.0.0.0', port=5000, debug=False),
                 daemon=True
             )
             flask_thread.start()
