@@ -50,8 +50,8 @@ try:
 except ImportError:
     # 默认占位符，上传到GitHub时使用
     ETHERSCAN_API_KEY = "YourEtherscanApiKey"  # 替换为您的API密钥
-    eth_data['addresses'] = ['0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6']
-    eth_data['current_address'] = '0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6'
+    eth_data['addresses'] = ['0xF977814e90dA44bFA03b6295A0616a897441aceC']
+    eth_data['current_address'] = '0xF977814e90dA44bFA03b6295A0616a897441aceC'
 
 # HTML模板
 ETH_HTML_TEMPLATE = """
@@ -150,6 +150,27 @@ ETH_HTML_TEMPLATE = """
             color: #F44336;
         }
         
+        .token-cell {
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .token-ETH {
+            color: #64B5F6;
+        }
+        
+        .token-ELON {
+            color: #FF9800;
+        }
+        
+        .token-TRUMP {
+            color: #E91E63;
+        }
+        
+        .token-ERC20 {
+            color: #9C27B0;
+        }
+        
         @keyframes flash-new {
             0% { background-color: transparent; }
             50% { background-color: rgba(76, 175, 80, 0.3); }
@@ -238,7 +259,8 @@ ETH_HTML_TEMPLATE = """
                     <th>区块</th>
                     <th>时间</th>
                     <th>类型</th>
-                    <th>金额 (ETH)</th>
+                    <th>代币</th>
+                    <th>金额</th>
                 </tr>
             </thead>
             <tbody id="transactions-table">
@@ -248,6 +270,7 @@ ETH_HTML_TEMPLATE = """
                     <td>{{ tx.blockNumber }}</td>
                     <td>{{ tx.timeStamp }}</td>
                     <td class="{{ tx.direction }}">{{ tx.direction }}</td>
+                    <td class="token-cell token-{{ tx.token }}">{{ tx.token }}</td>
                     <td class="value-cell">{{ tx.value }}</td>
                 </tr>
                 {% endfor %}
@@ -313,6 +336,7 @@ ETH_HTML_TEMPLATE = """
                                 <td>${tx.blockNumber}</td>
                                 <td>${tx.timeStamp}</td>
                                 <td class="${tx.direction}">${tx.direction}</td>
+                                <td class="token-cell token-${tx.token}">${tx.token}</td>
                                 <td class="value-cell">${tx.value}</td>
                             `;
                             tableBody.appendChild(row);
@@ -326,8 +350,8 @@ ETH_HTML_TEMPLATE = """
                 });
         }
         
-        // 每30秒刷新一次数据
-        setInterval(refreshData, 30000);
+        // 每15秒刷新一次数据
+        setInterval(refreshData, 15000);
     </script>
 </body>
 </html>
@@ -369,12 +393,27 @@ def get_eth_transactions() -> List[Dict[str, Any]]:
                 timestamp = datetime.fromtimestamp(int(tx['timeStamp']))
                 formatted_time = timestamp.strftime('%Y-%m-%d %H:%M:%S')
                 
+                # 尝试识别代币名称
+                token_name = "ETH"  # 默认为ETH
+                
+                # 如果有input数据且长度大于10，可能是代币交易
+                if tx.get('input') and len(tx['input']) > 10:
+                    # 尝试从input数据或其他字段识别代币
+                    # 这里使用一个简单的方法，实际上需要更复杂的逻辑
+                    if tx.get('to') and tx['to'].lower() == '0x761d38e5ddf6ccf6cf7c55759d5210750b5d60f3'.lower():
+                        token_name = "ELON"
+                    elif tx.get('to') and tx['to'].lower() == '0x1ce270557c1f68cfb577b856766310bf8b47fd9c'.lower():
+                        token_name = "TRUMP"
+                    elif tx.get('input').startswith('0xa9059cbb'):  # ERC20 transfer方法的签名
+                        token_name = "ERC20"
+                
                 transactions.append({
                     'hash': tx['hash'],
                     'blockNumber': tx['blockNumber'],
                     'timeStamp': formatted_time,
                     'direction': direction,
-                    'value': f"{value_eth:.6f}"
+                    'value': f"{value_eth:.6f}",
+                    'token': token_name
                 })
             
             return transactions

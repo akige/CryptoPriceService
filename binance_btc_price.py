@@ -420,7 +420,7 @@ def update_prices():
             shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         except Exception as e:
             logger.error(f"Error updating prices: {str(e)}")
-        time.sleep(5)  # 每5秒更新一次
+        time.sleep(3)  # 每3秒更新一次，加快刷新速度
 
 @app.route('/')
 def index():
