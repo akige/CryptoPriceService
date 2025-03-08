@@ -3,7 +3,7 @@ import time
 from datetime import datetime
 from typing import Dict, Any, List
 import threading
-from flask import Flask, render_template_string, jsonify, Blueprint
+from flask import Flask, render_template_string, jsonify, Blueprint, request
 import logging
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
@@ -31,16 +31,21 @@ eth_bp = Blueprint('eth_monitor', __name__)
 eth_data = {
     'update_time': '',
     'transactions': [],
-    'address': '0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6'
+    'addresses': [],
+    'current_address': ''
 }
 
-# 获取Etherscan API密钥
-# 尝试从api_keys.py加载API密钥，如果不存在则使用默认值
+# 获取Etherscan API密钥和ETH地址
+# 尝试从api_keys.py加载配置，如果不存在则使用默认值
 try:
-    from api_keys import ETHERSCAN_API_KEY
+    from api_keys import ETHERSCAN_API_KEY, ETH_ADDRESSES
+    eth_data['addresses'] = ETH_ADDRESSES
+    eth_data['current_address'] = ETH_ADDRESSES[0] if ETH_ADDRESSES else '0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6'
 except ImportError:
     # 默认占位符，上传到GitHub时使用
     ETHERSCAN_API_KEY = "YourEtherscanApiKey"  # 替换为您的API密钥
+    eth_data['addresses'] = ['0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6']
+    eth_data['current_address'] = '0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6'
 
 # HTML模板
 ETH_HTML_TEMPLATE = """
@@ -84,6 +89,20 @@ ETH_HTML_TEMPLATE = """
             color: #4CAF50;
             padding: 0 10px;
             word-break: break-all;
+        }
+        .address-selector {
+            margin-bottom: 20px;
+            padding: 0 10px;
+        }
+        .address-selector select {
+            background-color: #333;
+            color: #FFF;
+            border: 1px solid #555;
+            padding: 8px;
+            border-radius: 4px;
+            width: 100%;
+            max-width: 500px;
+            font-family: monospace;
         }
         table {
             width: 100%;
@@ -165,7 +184,21 @@ ETH_HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="update-time">最后更新: <span id="update-time">{{ update_time }}</span></div>
+        
+        {% if addresses|length > 1 %}
+        <div class="address-selector">
+            <form id="address-form" action="/eth" method="get">
+                <select name="address" id="address-select" onchange="this.form.submit()">
+                    {% for addr in addresses %}
+                    <option value="{{ addr }}" {% if addr == address %}selected{% endif %}>{{ addr }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+        {% endif %}
+        
         <div class="address-info">监控地址: <span id="address">{{ address }}</span></div>
+        
         <table>
             <thead>
                 <tr>
@@ -193,38 +226,43 @@ ETH_HTML_TEMPLATE = """
     <script>
         // 自动刷新数据
         function refreshData() {
+            // 获取当前选中的地址
+            const currentAddress = document.getElementById('address').textContent;
+            
             fetch('/api/eth-transactions')
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('update-time').textContent = data.update_time;
-                    document.getElementById('address').textContent = data.address;
                     
-                    const tableBody = document.getElementById('transactions-table');
-                    const oldHashes = Array.from(tableBody.querySelectorAll('tr')).map(row => 
-                        row.querySelector('td:first-child a').textContent
-                    );
-                    
-                    // 清空表格
-                    tableBody.innerHTML = '';
-                    
-                    // 添加新数据
-                    data.transactions.forEach(tx => {
-                        const row = document.createElement('tr');
+                    // 只有当地址匹配时才更新表格
+                    if (data.current_address === currentAddress) {
+                        const tableBody = document.getElementById('transactions-table');
+                        const oldHashes = Array.from(tableBody.querySelectorAll('tr')).map(row => 
+                            row.querySelector('td:first-child a').textContent
+                        );
                         
-                        // 检查是否是新交易
-                        if (!oldHashes.includes(tx.hash)) {
-                            row.classList.add('flash-new');
-                        }
+                        // 清空表格
+                        tableBody.innerHTML = '';
                         
-                        row.innerHTML = `
-                            <td class="hash-cell"><a href="https://etherscan.io/tx/${tx.hash}" target="_blank">${tx.hash}</a></td>
-                            <td>${tx.blockNumber}</td>
-                            <td>${tx.timeStamp}</td>
-                            <td class="${tx.direction}">${tx.direction}</td>
-                            <td class="value-cell">${tx.value}</td>
-                        `;
-                        tableBody.appendChild(row);
-                    });
+                        // 添加新数据
+                        data.transactions.forEach(tx => {
+                            const row = document.createElement('tr');
+                            
+                            // 检查是否是新交易
+                            if (!oldHashes.includes(tx.hash)) {
+                                row.classList.add('flash-new');
+                            }
+                            
+                            row.innerHTML = `
+                                <td class="hash-cell"><a href="https://etherscan.io/tx/${tx.hash}" target="_blank">${tx.hash}</a></td>
+                                <td>${tx.blockNumber}</td>
+                                <td>${tx.timeStamp}</td>
+                                <td class="${tx.direction}">${tx.direction}</td>
+                                <td class="value-cell">${tx.value}</td>
+                            `;
+                            tableBody.appendChild(row);
+                        });
+                    }
                 })
                 .catch(error => console.error('Error fetching data:', error));
         }
@@ -239,7 +277,7 @@ ETH_HTML_TEMPLATE = """
 def get_eth_transactions() -> List[Dict[str, Any]]:
     """获取指定ETH地址的交易记录"""
     try:
-        address = eth_data['address']
+        address = eth_data['current_address']
         url = f"https://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock=0&endblock=99999999&sort=desc&apikey={ETHERSCAN_API_KEY}"
         
         response = http.get(url, timeout=10)
@@ -294,17 +332,28 @@ def update_eth_transactions():
 @eth_bp.route('/eth')
 def eth_index():
     """ETH交易监控页面"""
+    # 检查是否有地址参数
+    address = request.args.get('address')
+    if address and address in eth_data['addresses']:
+        eth_data['current_address'] = address
+    
     return render_template_string(
         ETH_HTML_TEMPLATE,
         update_time=eth_data['update_time'],
-        address=eth_data['address'],
+        address=eth_data['current_address'],
+        addresses=eth_data['addresses'],
         transactions=eth_data['transactions']
     )
 
 @eth_bp.route('/api/eth-transactions')
 def get_eth_data():
     """API端点，返回ETH交易数据"""
-    return jsonify(eth_data)
+    return jsonify({
+        'update_time': eth_data['update_time'],
+        'current_address': eth_data['current_address'],
+        'addresses': eth_data['addresses'],
+        'transactions': eth_data['transactions']
+    })
 
 # 启动ETH交易监控线程
 def start_eth_monitor():

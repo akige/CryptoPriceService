@@ -14,6 +14,7 @@
 - 自动数据刷新(涨跌闪烁效果)
 - 日志记录功能
 - **新功能：实时监控指定ETH地址的链上交易**
+- **新功能：支持监控多个ETH地址，可随时切换查看**
 
 ## 系统要求
 
@@ -40,14 +41,21 @@ pip install pywin32 flask ccxt flask-cors requests
 - install_service.bat（安装脚本）
 - uninstall_service.bat（卸载脚本）
 
-3. **配置API密钥：** 有两种方式设置Etherscan API密钥：
-   - 方式一：直接在 eth_address_monitor.py 文件中修改 ETHERSCAN_API_KEY 变量
-   - 方式二（推荐）：创建 api_keys.py 文件，内容如下：
-     ```python
-     # Etherscan API密钥
-     ETHERSCAN_API_KEY = "您的API密钥"
-     ```
+3. **配置API密钥和ETH地址：** 创建 api_keys.py 文件，内容如下：
+   ```python
+   # Etherscan API密钥
+   ETHERSCAN_API_KEY = "您的API密钥"
+   
+   # 要监控的ETH地址列表
+   ETH_ADDRESSES = [
+       "0x3B2eb8CddE3bbCb184d418c0568De2Eb40C3BfE6",  # 主要监控地址
+       # 可以添加更多地址，例如：
+       # "0x123456789abcdef123456789abcdef123456789a",
+       # "0xabcdef123456789abcdef123456789abcdef1234",
+   ]
+   ```
    - 您可以在 https://etherscan.io/myapikey 免费注册获取API密钥
+   - 您可以添加多个ETH地址进行监控，程序会提供地址切换功能
 
 4. 以管理员权限运行 install_service.bat 安装服务
 
@@ -72,7 +80,9 @@ pip install pywin32 flask ccxt flask-cors requests
 1. 服务启动后，打开浏览器访问：http://localhost:6000
 2. 页面会自动显示并更新加密货币的价格信息
 3. 服务日志位于：C:\crypto_price_service.log
-4. **ETH地址监控：** 访问 http://localhost:6000/eth 查看指定ETH地址的最近5条交易
+4. **ETH地址监控：** 
+   - 访问 http://localhost:6000/eth 查看ETH地址的最近5条交易
+   - 如果配置了多个ETH地址，可以通过页面上的下拉菜单切换不同的地址
 
 ## 卸载说明
 
