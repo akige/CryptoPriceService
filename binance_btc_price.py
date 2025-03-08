@@ -91,8 +91,8 @@ HTML_TEMPLATE = """
             padding: 0 10px;
         }
         table {
-            width: 1440px;
-            min-width: 1440px;
+            width: 1000px;
+            min-width: 1000px;
             table-layout: fixed;
             border-collapse: collapse;
             white-space: nowrap;
@@ -155,7 +155,7 @@ HTML_TEMPLATE = """
         
         /* 调整列宽比例 */
         th:nth-child(1), td:nth-child(1) { width: 100px; min-width: 100px; max-width: 100px; text-align: center; font-weight: bold; padding: 8px 0; }
-        th:nth-child(2), td:nth-child(2) { width: 260px; min-width: 260px; max-width: 260px; text-align: center; font-weight: bold; padding: 8px 0; }
+        th:nth-child(2), td:nth-child(2) { width: 200px; min-width: 200px; max-width: 200px; text-align: center; font-weight: bold; padding: 8px 0; }
         th:nth-child(3), td:nth-child(3) { width: 200px; min-width: 200px; max-width: 200px; text-align: center; padding: 8px 0; }
         th:nth-child(4), td:nth-child(4) { width: 280px; min-width: 280px; max-width: 280px; text-align: center; padding: 8px 0; }
         
@@ -206,9 +206,9 @@ HTML_TEMPLATE = """
                 padding: 6px 0;
             }
             th:nth-child(2), td:nth-child(2) { 
-                width: 260px; 
-                min-width: 260px;
-                max-width: 260px;
+                width: 200px; 
+                min-width: 200px;
+                max-width: 200px;
                 padding: 6px 0;
             }
             th:nth-child(3), td:nth-child(3) { 
@@ -290,10 +290,10 @@ HTML_TEMPLATE = """
                         }
                         row.appendChild(priceCell);
                         
-                        // 涨跌幅
-                        const percentagesCell = document.createElement('td');
-                        percentagesCell.innerHTML = item.percentages;
-                        row.appendChild(percentagesCell);
+                        // 24小时涨跌幅
+                        const percentageCell = document.createElement('td');
+                        percentageCell.innerHTML = item.percentage;
+                        row.appendChild(percentageCell);
                         
                         // 24H交易量
                         const volumeCell = document.createElement('td');
@@ -302,13 +302,15 @@ HTML_TEMPLATE = """
                         row.appendChild(volumeCell);
                         
                         tbody.appendChild(row);
+                        
+                        // 更新上一次价格
                         previousPrices[item.symbol] = item.price;
                     });
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => console.error('Error fetching data:', error));
         }
         
-        // 页面加载完成后立即更新一次
+        // 页面加载时立即更新一次
         document.addEventListener('DOMContentLoaded', updateData);
         
         // 每秒更新一次数据
@@ -317,17 +319,25 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <div class="update-time">更新时间：</div>
+        <div class="update-time">更新时间：{{ update_time }}</div>
         <table>
             <thead>
                 <tr>
-                    <th>币种名称</th>
+                    <th>币种</th>
                     <th>最新价格</th>
-                    <th>1分/5分/15分/1时/4时/1天涨跌%</th>
-                    <th>24H交易量</th>
+                    <th>24小时涨跌幅</th>
+                    <th>24小时交易量</th>
                 </tr>
             </thead>
             <tbody>
+                {% for item in prices %}
+                <tr>
+                    <td>{{ item.symbol }}</td>
+                    <td class="price-cell">{{ item.price }}</td>
+                    <td>{{ item.percentage|safe }}</td>
+                    <td class="price-cell">{{ item.volume }}</td>
+                </tr>
+                {% endfor %}
             </tbody>
         </table>
     </div>
@@ -365,39 +375,19 @@ def get_price_data() -> List[Dict[str, Any]]:
 
         for symbol in symbols:
             try:
-                # 获取OHLCV数据
-                timeframes = {
-                    '1m': 1,
-                    '5m': 5,
-                    '15m': 15,
-                    '1h': 60,
-                    '4h': 240,
-                    '1d': 1440
-                }
-                
-                percentages = []
-                for timeframe in timeframes.keys():
-                    try:
-                        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=2)
-                        if len(ohlcv) >= 2:
-                            open_price = ohlcv[-2][1]  # 使用前一个周期的开盘价
-                            close_price = ohlcv[-1][4]  # 使用当前周期的收盘价
-                            percentage = ((close_price - open_price) / open_price) * 100
-                            percentages.append(format_percentage(percentage))
-                        else:
-                            percentages.append(format_percentage(0))
-                    except Exception as e:
-                        logger.error(f"Error fetching {timeframe} data for {symbol}: {str(e)}")
-                        percentages.append(format_percentage(0))
-
-                # 获取24小时交易量
+                # 获取24小时行情数据
                 ticker = exchange.fetch_ticker(symbol)
+                
+                # 获取24小时涨跌幅
+                percentage = ticker['percentage'] if 'percentage' in ticker else 0
+                
+                # 获取24小时交易量
                 volume = ticker['quoteVolume'] if 'quoteVolume' in ticker else 0
 
                 results.append({
                     'symbol': symbol.replace('/USDT', ''),
                     'price': f"{ticker['last']:.2f}",
-                    'percentages': ' '.join(percentages),
+                    'percentage': format_percentage(percentage),
                     'volume': format_volume(volume)
                 })
 
