@@ -166,22 +166,22 @@ HTML_TEMPLATE = """
         
         @keyframes flash-green {
             0% { background-color: transparent; }
-            50% { background-color: rgba(76, 175, 80, 0.5); }
+            50% { background-color: rgba(76, 175, 80, 0.6); }
             100% { background-color: transparent; }
         }
         
         @keyframes flash-red {
             0% { background-color: transparent; }
-            50% { background-color: rgba(244, 67, 54, 0.5); }
+            50% { background-color: rgba(244, 67, 54, 0.6); }
             100% { background-color: transparent; }
         }
         
         .flash-green {
-            animation: flash-green 0.5s ease-out;
+            animation: flash-green 0.3s ease-out;
         }
         
         .flash-red {
-            animation: flash-red 0.5s ease-out;
+            animation: flash-red 0.3s ease-out;
         }
         
         /* 调整列宽比例 */
@@ -347,6 +347,8 @@ HTML_TEMPLATE = """
     <script>
         let lastPrices = {};
         let flashTimeouts = {};
+        let lastUpdateTime = Date.now();
+        let updateCount = 0;
         
         function extractPrice(html) {
             const text = html.replace(/<[^>]*>/g, '').trim();
@@ -374,7 +376,7 @@ HTML_TEMPLATE = """
             flashTimeouts[symbol] = setTimeout(() => {
                 tr.classList.remove(flashClass);
                 delete flashTimeouts[symbol];
-            }, 500);
+            }, 300);
         }
         
         function updateData() {
@@ -417,14 +419,24 @@ HTML_TEMPLATE = """
                             lastPrices[row.symbol] = currentPrice;
                         }
                     });
+                    
+                    // 计算前端更新频率
+                    updateCount++;
+                    const now = Date.now();
+                    if (now - lastUpdateTime >= 1000) {
+                        const fps = updateCount / ((now - lastUpdateTime) / 1000);
+                        document.getElementById('client-refresh-rate').textContent = fps.toFixed(1) + "/秒";
+                        updateCount = 0;
+                        lastUpdateTime = now;
+                    }
                 })
                 .catch(error => {
                     console.error('Error fetching data:', error);
                 });
         }
 
-        // 每200毫秒更新一次数据，提高刷新频率
-        setInterval(updateData, 200);
+        // 每100毫秒更新一次数据，提高刷新频率
+        setInterval(updateData, 100);
         
         // 立即执行一次更新
         updateData();
@@ -435,7 +447,8 @@ HTML_TEMPLATE = """
         <div class="update-info">
             <div>更新时间: <span id="update-time" class="update-time">{{ update_time }}</span></div>
             <div>更新计数: <span id="update-count" class="update-count">{{ update_count }}</span></div>
-            <div>刷新率: <span id="refresh-rate" class="refresh-rate">0/秒</span></div>
+            <div>服务器刷新率: <span id="refresh-rate" class="refresh-rate">0/秒</span></div>
+            <div>客户端刷新率: <span id="client-refresh-rate" class="refresh-rate">0/秒</span></div>
         </div>
         <table>
             <thead>
@@ -487,7 +500,7 @@ def get_price_data() -> List[Dict[str, Any]]:
     try:
         exchange = ccxt.binance({
             'enableRateLimit': False,  # 禁用CCXT内置的速率限制，最大化速度
-            'timeout': 3000  # 设置超时时间为3秒
+            'timeout': 1500  # 减少超时时间为1.5秒
         })
         
         symbols = [
@@ -526,7 +539,8 @@ def get_price_data() -> List[Dict[str, Any]]:
                         'raw_price': price,  # 保存原始价格用于比较
                         'percentage': percentage,
                         'percentage_changes': percentage_changes,
-                        'volume': format_volume(volume)
+                        'volume': format_volume(volume),
+                        'timestamp': time.time()  # 添加时间戳
                     }
                 except Exception as e:
                     logger.error(f"Error processing {symbol}: {str(e)}")
@@ -610,8 +624,8 @@ def update_prices():
         except Exception as e:
             logger.error(f"Error updating prices: {str(e)}")
         
-        # 减少延迟以提高刷新速度
-        time.sleep(0.05)  # 50毫秒延迟，每秒最多20次更新
+        # 最小化延迟以提高刷新速度
+        time.sleep(0.01)  # 10毫秒延迟，每秒最多100次更新
 
 @app.route('/')
 def index():
