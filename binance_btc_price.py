@@ -13,6 +13,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 import os
+import asyncio
+import concurrent.futures
 # 导入ETH地址监控模块
 from eth_address_monitor import eth_bp, start_eth_monitor
 
@@ -47,6 +49,11 @@ app.logger.setLevel(logging.ERROR)  # 设置Flask日志级别
 CORS(app)  # 启用CORS支持
 # 注册ETH地址监控蓝图
 app.register_blueprint(eth_bp)
+
+# 优化Flask配置
+app.config['JSON_SORT_KEYS'] = False  # 禁用JSON键排序，提高性能
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False  # 禁用JSON美化，减少数据大小
+app.config['PROPAGATE_EXCEPTIONS'] = True  # 传播异常，便于调试
 
 # 共享数据存储
 shared_data = {
@@ -263,49 +270,60 @@ HTML_TEMPLATE = """
     </style>
     <script>
         let previousPrices = {};
+        let lastUpdateTime = '';
         
         function updateData() {
             fetch('/api/prices')
                 .then(response => response.json())
                 .then(data => {
-                    document.querySelector('.update-time').textContent = '更新时间：' + data.update_time;
-                    const tbody = document.querySelector('tbody');
-                    tbody.innerHTML = '';
-                    
-                    data.prices.forEach(item => {
-                        const row = document.createElement('tr');
-                        const previousPrice = previousPrices[item.symbol];
+                    // 只有当更新时间变化时才更新数据，避免不必要的DOM操作
+                    if (data.update_time !== lastUpdateTime) {
+                        lastUpdateTime = data.update_time;
+                        document.querySelector('.update-time').textContent = '更新时间：' + data.update_time;
                         
-                        // 币种名称
-                        const symbolCell = document.createElement('td');
-                        symbolCell.textContent = item.symbol;
-                        row.appendChild(symbolCell);
+                        // 使用DocumentFragment提高性能
+                        const fragment = document.createDocumentFragment();
                         
-                        // 最新价格
-                        const priceCell = document.createElement('td');
-                        priceCell.className = 'price-cell';
-                        priceCell.textContent = item.price;
-                        if (previousPrice && previousPrice !== item.price) {
-                            priceCell.classList.add(parseFloat(item.price) > parseFloat(previousPrice) ? 'flash-green' : 'flash-red');
-                        }
-                        row.appendChild(priceCell);
+                        data.prices.forEach(item => {
+                            const row = document.createElement('tr');
+                            const previousPrice = previousPrices[item.symbol];
+                            
+                            // 币种名称
+                            const symbolCell = document.createElement('td');
+                            symbolCell.textContent = item.symbol;
+                            row.appendChild(symbolCell);
+                            
+                            // 最新价格
+                            const priceCell = document.createElement('td');
+                            priceCell.className = 'price-cell';
+                            priceCell.textContent = item.price;
+                            if (previousPrice && previousPrice !== item.price) {
+                                priceCell.classList.add(parseFloat(item.price) > parseFloat(previousPrice) ? 'flash-green' : 'flash-red');
+                            }
+                            row.appendChild(priceCell);
+                            
+                            // 24小时涨跌幅
+                            const percentageCell = document.createElement('td');
+                            percentageCell.innerHTML = item.percentage;
+                            row.appendChild(percentageCell);
+                            
+                            // 24H交易量
+                            const volumeCell = document.createElement('td');
+                            volumeCell.className = 'price-cell';
+                            volumeCell.textContent = item.volume;
+                            row.appendChild(volumeCell);
+                            
+                            fragment.appendChild(row);
+                            
+                            // 更新上一次价格
+                            previousPrices[item.symbol] = item.price;
+                        });
                         
-                        // 24小时涨跌幅
-                        const percentageCell = document.createElement('td');
-                        percentageCell.innerHTML = item.percentage;
-                        row.appendChild(percentageCell);
-                        
-                        // 24H交易量
-                        const volumeCell = document.createElement('td');
-                        volumeCell.className = 'price-cell';
-                        volumeCell.textContent = item.volume;
-                        row.appendChild(volumeCell);
-                        
-                        tbody.appendChild(row);
-                        
-                        // 更新上一次价格
-                        previousPrices[item.symbol] = item.price;
-                    });
+                        // 一次性更新DOM
+                        const tbody = document.querySelector('tbody');
+                        tbody.innerHTML = '';
+                        tbody.appendChild(fragment);
+                    }
                 })
                 .catch(error => console.error('Error fetching data:', error));
         }
@@ -313,8 +331,8 @@ HTML_TEMPLATE = """
         // 页面加载时立即更新一次
         document.addEventListener('DOMContentLoaded', updateData);
         
-        // 每秒更新一次数据
-        setInterval(updateData, 1000);
+        // 每500毫秒更新一次数据
+        setInterval(updateData, 500);
     </script>
 </head>
 <body>
@@ -373,27 +391,37 @@ def get_price_data() -> List[Dict[str, Any]]:
                   'ADA/USDT', 'AVAX/USDT', 'DOGE/USDT', 'DOT/USDT', 'LINK/USDT']
         results = []
 
-        for symbol in symbols:
-            try:
-                # 获取24小时行情数据
-                ticker = exchange.fetch_ticker(symbol)
-                
-                # 获取24小时涨跌幅
-                percentage = ticker['percentage'] if 'percentage' in ticker else 0
-                
-                # 获取24小时交易量
-                volume = ticker['quoteVolume'] if 'quoteVolume' in ticker else 0
+        # 使用线程池并行获取数据
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            def fetch_symbol_data(symbol):
+                try:
+                    # 获取24小时行情数据
+                    ticker = exchange.fetch_ticker(symbol)
+                    
+                    # 获取24小时涨跌幅
+                    percentage = ticker['percentage'] if 'percentage' in ticker else 0
+                    
+                    # 获取24小时交易量
+                    volume = ticker['quoteVolume'] if 'quoteVolume' in ticker else 0
 
-                results.append({
-                    'symbol': symbol.replace('/USDT', ''),
-                    'price': f"{ticker['last']:.2f}",
-                    'percentage': format_percentage(percentage),
-                    'volume': format_volume(volume)
-                })
+                    return {
+                        'symbol': symbol.replace('/USDT', ''),
+                        'price': f"{ticker['last']:.2f}",
+                        'percentage': format_percentage(percentage),
+                        'volume': format_volume(volume)
+                    }
+                except Exception as e:
+                    logger.error(f"Error processing {symbol}: {str(e)}")
+                    return None
 
-            except Exception as e:
-                logger.error(f"Error processing {symbol}: {str(e)}")
-                continue
+            # 并行执行所有请求
+            futures = [executor.submit(fetch_symbol_data, symbol) for symbol in symbols]
+            
+            # 收集结果
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    results.append(result)
 
         return results
 
@@ -410,7 +438,7 @@ def update_prices():
             shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         except Exception as e:
             logger.error(f"Error updating prices: {str(e)}")
-        time.sleep(3)  # 每3秒更新一次，加快刷新速度
+        time.sleep(1)  # 每1秒更新一次，最大化刷新速度
 
 @app.route('/')
 def index():
@@ -430,4 +458,4 @@ if __name__ == "__main__":
     start_eth_monitor()
     
     # 启动Flask服务器
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
