@@ -62,10 +62,10 @@ pip install pywin32 flask ccxt flask-cors requests
 
 ## 使用说明
 
-1. 服务启动后，打开浏览器访问：http://localhost:5000
+1. 服务启动后，打开浏览器访问：http://localhost:6000
 2. 页面会自动显示并更新加密货币的价格信息
 3. 服务日志位于：C:\crypto_price_service.log
-4. **ETH地址监控：** 访问 http://localhost:5000/eth 查看指定ETH地址的最近5条交易
+4. **ETH地址监控：** 访问 http://localhost:6000/eth 查看指定ETH地址的最近5条交易
 
 ## 卸载说明
 
@@ -81,7 +81,7 @@ pip install pywin32 flask ccxt flask-cors requests
 
 2. 页面无法访问
    - 确认服务是否正在运行
-   - 检查端口 5000 是否被其他程序占用
+   - 检查端口 6000 是否被其他程序占用
    - 检查防火墙设置
 
 3. ETH交易监控不显示数据
