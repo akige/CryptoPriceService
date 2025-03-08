@@ -487,8 +487,11 @@ def get_price_data() -> List[Dict[str, Any]]:
             'timeout': 3000  # 设置超时时间为3秒
         })
         
-        symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'SOL/USDT',
-                  'ADA/USDT', 'AVAX/USDT', 'DOGE/USDT', 'DOT/USDT', 'LINK/USDT']
+        symbols = [
+            'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'DOGE/USDT',
+            'XRP/USDT', 'BNB/USDT', 'SHIB/USDT', 'ADA/USDT',
+            'XLM/USDT', 'TRX/USDT'
+        ]
         results = []
 
         # 使用线程池并行获取数据
@@ -504,11 +507,22 @@ def get_price_data() -> List[Dict[str, Any]]:
                     # 获取24小时交易量
                     volume = ticker['quoteVolume'] if 'quoteVolume' in ticker else 0
 
+                    price = ticker['last']
+                    price_str = f"{price:.2f}"
+                    
+                    # 创建HTML格式的价格显示
+                    price_html = f'<span style="color: {HTML_GREEN}">{price_str}</span>'
+                    
+                    # 创建百分比变化的HTML
+                    percentage_changes = format_percentage(percentage)
+
                     return {
                         'symbol': symbol.replace('/USDT', ''),
-                        'price': f"{ticker['last']:.2f}",
-                        'raw_price': ticker['last'],  # 保存原始价格用于比较
-                        'percentage': format_percentage(percentage),
+                        'price': price_str,
+                        'price_html': price_html,
+                        'raw_price': price,  # 保存原始价格用于比较
+                        'percentage': percentage,
+                        'percentage_changes': percentage_changes,
                         'volume': format_volume(volume)
                     }
                 except Exception as e:
@@ -566,18 +580,35 @@ def price_updater(symbol):
 
 def update_prices():
     """更新价格数据的线程函数"""
+    last_update_time = time.time()
+    updates_count = 0
+    
     while True:
         try:
             # 获取价格数据
             prices = get_price_data()
+            
+            # 更新共享数据
             shared_data['prices'] = prices
             shared_data['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             shared_data['update_count'] += 1
+            
+            # 计算更新频率
+            current_time = time.time()
+            time_diff = current_time - last_update_time
+            if time_diff >= 1.0:  # 每秒计算一次
+                updates_per_second = updates_count / time_diff
+                shared_data['updates_per_second'] = f"{updates_per_second:.1f}"
+                updates_count = 0
+                last_update_time = current_time
+            else:
+                updates_count += 1
+                
         except Exception as e:
             logger.error(f"Error updating prices: {str(e)}")
-            
-        # 尽可能快地更新，不添加延迟
-        # 注意：这可能会导致高CPU使用率和可能的API限制，但会提供最快的刷新速度
+        
+        # 添加小延迟以避免过度请求
+        time.sleep(0.1)  # 100毫秒延迟，每秒最多10次更新
 
 @app.route('/')
 def index():
@@ -590,7 +621,8 @@ def get_prices():
     return jsonify({
         'update_time': shared_data['update_time'],
         'prices': shared_data['prices'],
-        'update_count': shared_data['update_count']
+        'update_count': shared_data['update_count'],
+        'updates_per_second': shared_data.get('updates_per_second', '0.0')
     })
 
 if __name__ == "__main__":
