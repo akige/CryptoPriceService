@@ -9,6 +9,10 @@ from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 import os
 import ssl
+import urllib3
+
+# 抑制不安全请求的警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 设置日志级别
 logging.basicConfig(level=logging.ERROR)
